@@ -1,0 +1,4 @@
+After installing CGAL and GUDHI, build with
+
+cmake .
+make
