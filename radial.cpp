@@ -1,15 +1,17 @@
 /**
- * @triangulate.cpp
+ * @radial.cpp
  * @author  Willem Elbers <whe@willemelbers.com>
  * @version 1.0
  *
  * @section DESCRIPTION
  *
- * Computes the persistent homology of a superlevel filtration of a 
- * three-dimensional grid, using specified grid values.
+ * Computes the persistent homology of a radial filtration of a 
+ * binary field specified on a periodic 3D grid. See the README
+ * for more details.
  */
  
 #include <iostream>
+#include <sstream>
 #include <fstream>
 #include <list>
 #include <vector>
@@ -68,60 +70,83 @@ int box_idx(int width, int x, int y, int z) {
 int main(int argc, char * const argv[]) {
 	//Help option
 	if(argc == 2 && strcmp(argv[1], "--help")==0) {
-		std::cout << "Usage: ./triangulate FILE [PRIME] [OPTIONS]" << std::endl;
+		std::cout << "Usage: ./radial FILE THRESHOLD [PRIME] [OPTIONS]" << std::endl;
+		std::cout << "THRESHOLD is the value above (below in -i mode) which a cell is activated." << std::endl;
 		std::cout << "PRIME is the field coefficient (defaults is 2)." << std::endl;
 		std::cout << "" << std::endl;
-		std::cout << "  -i      changes to top-down mode (default is bottom-up)" << std::endl;
+		std::cout << "  -i      changes to inverted mode (active if <= threshold)" << std::endl;
 		std::cout << "  -o      write results to separate files per dimension" << std::endl;
 		std::cout << "  --help  displays this message" << std::endl;
 		std::cout << "" << std::endl;
 		std::cout << "Imports 3D binary periodic data cube and calculates a" << std::endl;
-		std::cout << "field filtration of a Delaunay triangulation of the grid." << std::endl;
+		std::cout << "spatial filtration of a Delaunay triangulation of the grid." << std::endl;
 		std::cout << "See Elbers & van de Weygaert (2018) for details." << std::endl;
 		return 0;
     }
 	
 	//FILE specified?
-	if (argc == 1) {
-		std::cout << "Usage: ./triangulate FILE [PRIME] [OPTIONS]" << std::endl;
-		std::cout << "PRIME is the field coefficient (defaults is 2)." << std::endl;
-		std::cout << "Try --help for more information." << std::endl;
-		return 0;
+	bool exit_with_message = false;
+	if (argc == 1) { //no
+		exit_with_message = true;
 	}
 	
 	//Check for options
-	bool top_down = false;
+	bool inverted = false;
 	bool output_files = false;	
 	for (int argi = 2; argi < argc; argi++) {
 		if (strcmp(argv[argi], "-i")==0) {
-			top_down = true;
+			inverted = true;
 		}
 		if (strcmp(argv[argi], "-o")==0) {
 			output_files = true;
 		}
 	}
 	
+	//Determine the activation threshold
+	float threshold = 1.0;
+	if (argc >= 3) {
+		//Is it a number?
+		std::istringstream is(argv[2]);		
+		is >> threshold;
+		
+		if (!is.eof() || is.fail()) {
+			exit_with_message = true;
+		}
+	} else {
+		exit_with_message = true;
+	}
+	
 	//The field characteristic (default is 2)
 	int coeff_field_characteristic = 2;	
 	//Determine whether a field coefficient was specified
-	if (argc >= 3) {
-		//Is it an integer?
+	if (argc >= 4) {
+		//Is it a positive integer?
 		bool is_int = true;
-		for (int stri = 0; stri < strlen(argv[2]); stri++) {
-			if (!isdigit(argv[2][stri])) {
+		for (int stri = 0; stri < strlen(argv[3]); stri++) {
+			if (!isdigit(argv[3][stri])) {
 				is_int = false;
 			}
 		}
 		
 		if (is_int) {
-			coeff_field_characteristic = std::stoi(argv[2]);
+			coeff_field_characteristic = std::stoi(argv[3]);
 		}
 	}
+		
+	
+	if (exit_with_message) {
+		std::cout << "Usage: ./radial FILE THRESHOLD [PRIME] [OPTIONS]" << std::endl;
+		std::cout << "THRESHOLD is the value above (below in -i mode) which a cell is activated." << std::endl;
+		std::cout << "PRIME is the field coefficient (defaults is 2)." << std::endl;
+		std::cout << "Try --help for more information." << std::endl;
+		return 0;
+	}
+	
 	
 	//File name entered as first argument
 	std::string fname(argv[1]);	
 	std::vector<float> floats = read_floats(fname);
-	
+		
 	int number_of_floats = floats.size();
 	int width = cbrt(number_of_floats); //cube root
 	
@@ -132,42 +157,211 @@ int main(int argc, char * const argv[]) {
 	Iso_cuboid domain(0,0,0,1,1,1);	
 	double spacing = 1./width;
 	
-	//Determine the maximum field value (only needed for top-down mode)
-	double max_val;
-	if (top_down) {
-		for (int x=0; x<width; x++) {
-			for (int y=0; y<width; y++) {		
-				for (int z=0; z<width; z++) {	
-					if ((x==0 && y==0 && z==0) || floats[box_idx(width,x,y,z)] > max_val) {
-						max_val = floats[box_idx(width,x,y,z)];
-					}
+	
+	
+	
+	//First determine the active cells (points that exceed the threshold)
+	std::vector<bool> active_cells(width*width*width);
+	bool any_active_cells = false;
+	bool any_inactive_cells = false;
+	for (int x=0; x<width; x++) {
+		for (int y=0; y<width; y++) {		
+			for (int z=0; z<width; z++) {
+								
+				if ((!inverted && floats[box_idx(width,x,y,z)] >= threshold)
+					|| (inverted && floats[box_idx(width,x,y,z)] <= threshold)) {
+						
+					active_cells[box_idx(width,x,y,z)] = true;
+					any_active_cells = true;
+				} else {
+					active_cells[box_idx(width,x,y,z)] = false;
+					any_inactive_cells = true;
 				}
 			}
 		}
 	}
 	
-		
-	int i = 0;
-	std::vector<Point_info_pair> points;
+	//At least one cell active?
+	if (!any_active_cells) {
+		std::cerr << "Not a single cell is active at this threshold." << std::endl;
+		return 0;		
+	}
+	//At least one cell inactive?
+	if (!any_inactive_cells) {
+		std::cerr << "Not a single cell is inactive at this threshold." << std::endl;
+		return 0;		
+	}
+	
+	//The filtration parameter is alpha, which is the radial growing/shrinking scale
+	
+	//We will determine the filtration value (alpha) of all cells
+	std::vector<float> fil_vals(width*width*width);
+	
+	//First consider the points with alpha = 0 (the active cells)
 	for (int x=0; x<width; x++) {
 		for (int y=0; y<width; y++) {		
-			for (int z=0; z<width; z++) {								
-				double fil_val;
-				if (top_down) {
-					fil_val = max_val - floats[box_idx(width,x,y,z)];					
-				} else {
-					fil_val = floats[box_idx(width,x,y,z)];
-				}
-				
-				Info info = {i, fil_val};
-				
-				points.push_back({Point(x*spacing, y*spacing, z*spacing), info});
-				
-				i++;
+			for (int z=0; z<width; z++) {
+								
+				if (active_cells[box_idx(width,x,y,z)]) {
+					fil_vals[box_idx(width,x,y,z)] = 0.0;
+				}				
 			}
 		}
 	}
-
+	
+	//Next radially shrink the active regions to determine the cells with negative alpha
+	bool done = false;
+	float alpha = 0.0;
+	while (!done) {		
+		int active_cells_left = 0;
+		alpha -= spacing;		
+				
+		//Find active cells that are adjacent to inactive cells and deactivate them
+		std::vector<bool> next_active_cells(width*width*width);
+		for (int x=0; x<width; x++) {
+			for (int y=0; y<width; y++) {		
+				for (int z=0; z<width; z++) {
+		
+					if (!active_cells[box_idx(width,x,y,z)]) {
+						//Inactive cells remain inactive
+						next_active_cells[box_idx(width,x,y,z)] = false;
+					} else {
+						//Active cells become inactive if adjacent to inactive
+						bool inactive_adjacent = false;
+		
+						for (int sx = -1; sx <= 1; sx++) {
+							for (int sy = -1; sy <= 1; sy++) {
+								for (int sz = -1; sz <= 1; sz++) {
+									if (x + sx >= 0 && y + sy >= 0 && z + sz >= 0
+										&& x + sx < width && y + sy < width && z + sz < width) {
+											
+										if (!active_cells[box_idx(width,x+sx,y+sy,z+sz)]) {
+											inactive_adjacent = true;
+										}
+									}
+								}
+							}
+						}
+						
+						
+						if (inactive_adjacent) {							
+							next_active_cells[box_idx(width,x,y,z)] = false;
+							
+							//Deactivated during this step => assign filtration value
+							fil_vals[box_idx(width,x,y,z)] = alpha;							
+						} else {
+							next_active_cells[box_idx(width,x,y,z)] = true;
+							active_cells_left++;
+						}				
+						
+					}
+				}
+			}
+		}
+		
+		active_cells = next_active_cells;
+		
+		if (active_cells_left==0) {
+			done = true;			
+		}
+	}
+	
+	//Done with points with negative alpha. Proceed with points with positive alpha.
+	
+	//Again determine the active cells (points that exceed the threshold)
+	for (int x=0; x<width; x++) {
+		for (int y=0; y<width; y++) {		
+			for (int z=0; z<width; z++) {
+								
+				if ((!inverted && floats[box_idx(width,x,y,z)] >= threshold)
+					|| (inverted && floats[box_idx(width,x,y,z)] <= threshold)) {
+						
+					active_cells[box_idx(width,x,y,z)] = true;
+				} else {
+					active_cells[box_idx(width,x,y,z)] = false;
+				}
+			}
+		}
+	}
+	
+	//Next radially grow the active regions to determine the cells with positive alpha
+	done = false;
+	alpha = 0.0;
+	while (!done) {		
+		int inactive_cells_left = 0;
+		alpha += spacing;		
+				
+		//Find inactive cells that are adjacent to active cells and activate them
+		std::vector<bool> next_active_cells(width*width*width);
+		for (int x=0; x<width; x++) {
+			for (int y=0; y<width; y++) {		
+				for (int z=0; z<width; z++) {
+		
+					if (active_cells[box_idx(width,x,y,z)]) {
+						//Active cells remain active
+						next_active_cells[box_idx(width,x,y,z)] = true;
+					} else {
+						//Inactive cells become active if adjacent to active
+						bool active_adjacent = false;
+		
+						for (int sx = -1; sx <= 1; sx++) {
+							for (int sy = -1; sy <= 1; sy++) {
+								for (int sz = -1; sz <= 1; sz++) {
+									if (x + sx >= 0 && y + sy >= 0 && z + sz >= 0
+										&& x + sx < width && y + sy < width && z + sz < width) {
+											
+										if (active_cells[box_idx(width,x+sx,y+sy,z+sz)]) {
+											active_adjacent = true;
+										}
+									}	
+								}
+							}
+						}
+						
+						
+						if (active_adjacent) {							
+							next_active_cells[box_idx(width,x,y,z)] = true;
+							
+							//Activated during this step => assign filtration value
+							fil_vals[box_idx(width,x,y,z)] = alpha;							
+						} else {
+							next_active_cells[box_idx(width,x,y,z)] = false;
+							inactive_cells_left++;
+						}				
+						
+					}
+				}
+			}
+		}
+		
+		active_cells = next_active_cells;
+		
+		if (inactive_cells_left==0) {
+			done = true;			
+		}
+	}
+	
+	//Done with creating the radial field
+	//write_floats("fil_vals.box", fil_vals);
+		
+	//Now that all cells have a filtration value, build the Delaunay triangulation + filtration
+	int i = 0;
+	std::vector<Point_info_pair> points;
+	
+	//First, insert the points
+	for (int x=0; x<width; x++) {
+		for (int y=0; y<width; y++) {		
+			for (int z=0; z<width; z++) {
+				double fil_val = fil_vals[box_idx(width,x,y,z)];
+				
+				Info info = {i, fil_val};				
+				points.push_back({Point(x*spacing, y*spacing, z*spacing), info});			
+				
+				i++;
+			}				
+		}
+	}
+	
 	//Sorting the points for fast insertion & faster runtime of CGAL algorithms
 	std::random_shuffle (points.begin(), points.end()); //algorithm assumes shuffled set
 	CGAL::spatial_sort(points.begin(), points.end(), Search_traits_3 ());
@@ -306,15 +500,6 @@ int main(int argc, char * const argv[]) {
 			
 			//Ignore trivial features (zero persistence)
 			if (birth != death) {
-				
-				if (top_down) {
-					birth = max_val - birth;				
-					if (isinf(death)) {
-						death = -INFINITY;
-					} else {
-						death = max_val - death;
-					}				
-				}	
 				
 				if (output_files) {
 					out_file << birth << " " << death << "\n";

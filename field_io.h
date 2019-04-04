@@ -1,22 +1,7 @@
 /**
- * @field_io.cpp
+ * @field_io.h
  * @author  Willem Elbers <whe@willemelbers.com>
  * @version 1.0
- *
- * @section LICENSE
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * @section DESCRIPTION
  *
@@ -60,5 +45,22 @@ std::vector<float> read_floats(std::string fname) {
 		std::cerr << "File not found." << std::endl;
 		exit(0);		
 	}
+}
+
+void write_floats(std::string fname, std::vector<float> floats) {
+	//Open the file (out, binary)
+	std::fstream file (fname, std::fstream::out | std::fstream::binary);
+	
+	if (file.is_open()) {
+		int float_size = sizeof(float); //bytes
 		
+		for (auto f : floats) {
+			file.write(reinterpret_cast<const char*>(&f), float_size);
+		}
+		
+		file.close();
+	} else {
+		std::cerr << "Could not write file." << std::endl;
+		exit(0);		
+	}
 }
